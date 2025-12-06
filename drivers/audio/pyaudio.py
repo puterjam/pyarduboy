@@ -1,10 +1,7 @@
 """
 PyAudio 音频驱动
 
-使用 PyAudio 库播放音频
-适合桌面环境（macOS、Windows、Linux）
-基于 PortAudio，跨平台低延迟音频库
-使用 callback 模式实现真正的非阻塞
+使用 PyAudio 库播放音频（完全直通，不做额外处理）
 """
 import numpy as np
 import threading
@@ -23,43 +20,25 @@ class PyAudioDriver(AudioDriver):
     """
     PyAudio 音频驱动 (Callback 模式)
 
-    使用 PyAudio callback 模式播放音频流
-    真正的非阻塞实现，不会影响主循环 FPS
-
-    Args:
-        sample_rate: 采样率，默认 48000 Hz (专业音频标准)
-        channels: 声道数，默认 2 (立体声，更好的兼容性)
-        buffer_size: 缓冲区大小，默认 1024 帧 (降低延迟)
-        volume: 音量，0.0-1.0，默认 0.3
-        chunk_size: 向后兼容参数（已弃用，使用 buffer_size）
-        use_24bit: 使用 24-bit 音频，默认 True (更高音质)
-
-    注意：
-        - 使用 48kHz 采样率以匹配系统默认音频设备
-        - 立体声输出提供更好的兼容性
-        - callback 模式实现真正的非阻塞音频播放
-        - 24-bit 音频提供更高的动态范围和音质
+    使用 PyAudio callback 模式播放 libretro 输出的 int16 音频流，
+    不做重采样、混音或音量处理，确保与核心输出完全一致。
     """
 
     def __init__(
         self,
-        sample_rate: int = 48000,  # 专业音频标准采样率
-        channels: int = 2,          # 立体声（更好的兼容性）
-        buffer_size: int = 1024,    # 降低延迟 (从 2048 降低到 1024)
-        volume: float = 0.3,
-        chunk_size: int = None,     # 向后兼容（已弃用，使用 buffer_size）
-        use_24bit: bool = True      # 使用 24-bit 音频（更高音质）
+        sample_rate: Optional[int] = None,
+        channels: int = 2,
+        buffer_size: int = 256,
+        use_24bit: bool = False
     ):
         super().__init__()
 
         if not PYAUDIO_AVAILABLE:
             raise ImportError("PyAudio is not installed. Please run: pip install pyaudio")
 
-        self._sample_rate = sample_rate
+        self._sample_rate = sample_rate or 0
         self.channels = channels
-        # 统一使用 buffer_size（兼容旧的 chunk_size 参数）
-        self.buffer_size = chunk_size if chunk_size is not None else buffer_size
-        self.volume = max(0.0, min(1.0, volume))
+        self.buffer_size = buffer_size
         self.use_24bit = use_24bit
 
         self._pyaudio: Optional[pyaudio.PyAudio] = None
@@ -134,9 +113,11 @@ class PyAudioDriver(AudioDriver):
         if self._running:
             return True
 
-        # 更新采样率（从 libretro 核心获取，应该是 50kHz）
         if sample_rate > 0:
             self._sample_rate = sample_rate
+
+        if self._sample_rate <= 0:
+            self._sample_rate = 44100  # 回退到常见桌面采样率
 
         try:
             # 创建 PyAudio 实例
@@ -160,12 +141,11 @@ class PyAudioDriver(AudioDriver):
             self._stream.start_stream()
             self._running = True
 
-            print(f"PyAudio initialized (callback mode - non-blocking):")
+            print("PyAudio initialized (callback mode - pass-through):")
             print(f"  Sample rate: {self._sample_rate} Hz")
             print(f"  Channels: {self.channels}")
             print(f"  Format: {bit_depth}-bit signed")
             print(f"  Buffer size: {self.buffer_size}")
-            print(f"  Volume: {self.volume}")
             return True
 
         except Exception as e:
@@ -198,57 +178,20 @@ class PyAudioDriver(AudioDriver):
             return
 
         try:
-            # 1. 处理不同的输入格式并归一化到 float32
-            # 参考 Ardens: SOUND_GAIN=2000, 归一化时除以 32768
-            if samples.dtype == np.int16:
-                # int16 → float32 (归一化到 [-1.0, 1.0])
-                samples_float = samples.astype(np.float32) / 32768.0
+            if samples.dtype != np.int16:
+                samples_int16 = np.asarray(samples, dtype=np.int16)
             else:
-                # 已经是 float32 格式
-                samples_float = samples.astype(np.float32)
+                samples_int16 = samples
 
-            # 2. 应用音量控制
-            if self.volume != 1.0:
-                samples_float *= self.volume
+            if not samples_int16.flags['C_CONTIGUOUS']:
+                samples_int16 = np.ascontiguousarray(samples_int16)
 
-            # 防止削波
-            samples_float = np.clip(samples_float, -1.0, 1.0)
-
-            # 3. 处理声道转换（在浮点域）
-            if samples_float.ndim == 1 and self.channels == 2:
-                # 单声道转立体声：使用 repeat 优化内存访问
-                samples_float = np.repeat(samples_float, 2)
-
-            # 4. 转换为目标位深度格式
-            if self.use_24bit:
-                # 转换为 24-bit (3 bytes per sample, little-endian)
-                # int24 范围: -8388608 to 8388607 (2^23)
-                samples_int32 = (samples_float * 8388607.0).astype(np.int32)
-
-                # 手动打包为 3-byte little-endian 格式
-                # 将 int32 数组转换为 bytes，然后取前3个字节
-                num_samples = len(samples_int32)
-                audio_data = bytearray(num_samples * 3)
-
-                for i, sample in enumerate(samples_int32):
-                    # 将 int32 转换为 3-byte little-endian
-                    # 处理负数：使用补码表示
-                    if sample < 0:
-                        sample = sample & 0xFFFFFF  # 24-bit 补码
-                    audio_data[i*3] = sample & 0xFF
-                    audio_data[i*3 + 1] = (sample >> 8) & 0xFF
-                    audio_data[i*3 + 2] = (sample >> 16) & 0xFF
-
-                audio_data = bytes(audio_data)
-            else:
-                # 转换为 16-bit
-                samples_int16 = (samples_float * 32767).astype(np.int16)
-                audio_data = samples_int16.tobytes()
+            audio_data = samples_int16.tobytes()
 
             with self._buffer_lock:
                 # 限制缓冲队列大小，避免延迟累积
-                # 最多保留约 10 帧的数据（约 167ms @ 60 FPS）
-                max_buffer_items = 10
+                # 保持约 15 帧的数据（约 250ms @ 60 FPS）提供足够缓冲
+                max_buffer_items = 15
                 if len(self._audio_buffer) < max_buffer_items:
                     self._audio_buffer.append(audio_data)
                 else:
@@ -261,12 +204,14 @@ class PyAudioDriver(AudioDriver):
             self._total_samples += len(samples)
 
             # 每 300 帧打印一次统计信息（约 5 秒 @ 60 FPS）
-            # if self._frame_count % 300 == 0:
-            #     avg_samples = self._total_samples / self._frame_count if self._frame_count > 0 else 0
-            #     underrun_rate = self._underrun_count / self._frame_count * 100 if self._frame_count > 0 else 0
-            #     print(f"[PyAudio Stats] Frames: {self._frame_count}, "
-            #           f"Avg samples/frame: {avg_samples:.1f}, "
-            #           f"Buffer underruns: {self._underrun_count} ({underrun_rate:.1f}%)")
+            if self._frame_count % 300 == 0:
+                avg_samples = self._total_samples / self._frame_count if self._frame_count > 0 else 0
+                underrun_rate = self._underrun_count / self._frame_count * 100 if self._frame_count > 0 else 0
+                buffer_len = len(self._audio_buffer)
+                print(f"[PyAudio] Frames: {self._frame_count}, "
+                      f"Avg: {avg_samples:.1f} samples/frame, "
+                      f"Underruns: {self._underrun_count} ({underrun_rate:.1f}%), "
+                      f"Queue: {buffer_len}")
 
         except Exception as e:
             # 只在第一次错误时打印
@@ -295,20 +240,10 @@ class PyAudioDriver(AudioDriver):
                 pass
             self._pyaudio = None
 
-        # 清空缓冲队列
         with self._buffer_lock:
             self._audio_buffer.clear()
 
         print("PyAudio closed")
-
-    def set_volume(self, volume: float) -> None:
-        """
-        设置音量
-
-        Args:
-            volume: 音量，0.0-1.0
-        """
-        self.volume = max(0.0, min(1.0, volume))
 
 
 class PyAudioDriverLowLatency(PyAudioDriver):

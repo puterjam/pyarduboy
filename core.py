@@ -222,10 +222,10 @@ class PyArduboy:
                 print("Failed to initialize video driver")
                 return False
 
-        # 初始化音频驱动
-        # Ardens/Arduous 核心固定使用 50000 Hz 采样率 (16MHz / 320)
+        # 初始化音频驱动（优先使用核心报告的真实采样率）
         if self.audio_driver:
-            if not self.audio_driver.init(sample_rate=50000):
+            audio_sample_rate = self.bridge.get_audio_sample_rate(default=44100)
+            if not self.audio_driver.init(sample_rate=audio_sample_rate):
                 print("Failed to initialize audio driver")
                 return False
 
@@ -327,13 +327,13 @@ class PyArduboy:
                         if frame is not None:
                             self._last_frame = frame
 
-                    # ✅ 关键: 每次 run_frame() 后立即获取并播放音频
-                    # 符合 libretro 规范: audio batch callback 必须与 retro_run() 同步
-                    # 参考: https://docs.libretro.com/development/cores/developing-cores/
-                    if self.audio_driver:
-                        samples = self.bridge.get_audio_samples()
-                        if samples is not None:
-                            self.audio_driver.play_samples(samples)
+                # ✅ 关键: 每个显示帧获取一次音频(不管执行了几次逻辑帧)
+                # 音频会在 libretro buffer 中自然累积,一次性取出播放
+                # 避免在 while 循环内重复获取导致音频数据翻倍
+                if self.audio_driver and logic_executed:
+                    samples = self.bridge.get_audio_samples()
+                    if samples is not None:
+                        self.audio_driver.play_samples(samples)
 
                 self._frame_count += 1
 

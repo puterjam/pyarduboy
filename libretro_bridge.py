@@ -4,10 +4,9 @@ LibRetro 桥接层
 负责与 arduous_libretro 核心进行交互，封装 libretro.py 的复杂性
 """
 import os
-import sys
+from pathlib import Path
 import numpy as np
-from typing import Optional, Callable
-from PIL import Image
+from typing import Optional
 
 try:
     from libretro import SessionBuilder, ArrayVideoDriver, ArrayAudioDriver, DEFAULT
@@ -46,7 +45,6 @@ class LibretroBridge:
         self.game_path = game_path
 
         # 模拟器工作目录设置
-        from pathlib import Path
         if retro_path:
             self.retro_path = Path(retro_path)
         else:
@@ -320,10 +318,13 @@ class LibretroBridge:
                 # 转换 array("h") 到 numpy int16 数组 (保持原始格式,避免精度损失)
                 samples_int16 = np.array(buffer, dtype=np.int16)
 
+                # 可选: 写入 WAV 文件调试原始缓冲
+                # self._write_audio_dump(samples_int16)
+
                 # 调试: 打印音频样本数（每 60 帧打印一次）
-                if not hasattr(self, '_audio_frame_count'):
-                    self._audio_frame_count = 0
-                self._audio_frame_count += 1
+                # if not hasattr(self, '_audio_frame_count'):
+                #     self._audio_frame_count = 0
+                # self._audio_frame_count += 1
                 # if self._audio_frame_count % 60 == 0:
                 #     print(f"[LibRetro Audio] Frame {self._audio_frame_count}: got {len(samples_int16)} samples")
 
@@ -339,6 +340,19 @@ class LibretroBridge:
             traceback.print_exc()
             return None
 
+    def get_audio_sample_rate(self, default: int = 44100) -> int:
+        try:
+            if self.audio_driver and getattr(self.audio_driver, 'system_av_info', None):
+                info = self.audio_driver.system_av_info
+                if info and getattr(info, 'timing', None):
+                    rate = getattr(info.timing, 'sample_rate', 0)
+                    if rate:
+                        return int(rate)
+        except Exception:
+            pass
+
+        return default
+    
     def stop(self) -> None:
         """停止 LibRetro 会话"""
         if self._running and self.session:
