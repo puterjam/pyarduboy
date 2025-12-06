@@ -303,7 +303,7 @@ class LibretroBridge:
         获取音频采样数据
 
         Returns:
-            numpy 数组，包含音频采样
+            numpy 数组 (int16 格式),包含音频采样
             如果没有音频数据则返回 None
         """
         if not self.audio_driver:
@@ -317,22 +317,20 @@ class LibretroBridge:
                 if len(buffer) == 0:
                     return None
 
-                # 转换 array("h") 到 numpy int16 数组
+                # 转换 array("h") 到 numpy int16 数组 (保持原始格式,避免精度损失)
                 samples_int16 = np.array(buffer, dtype=np.int16)
 
-                # 转换 int16 [-32768, 32767] 到 float32 [-1.0, 1.0]
-                samples_float = samples_int16.astype(np.float32) / 32768.0
-
-                # 调试：只在有非零音频时打印（避免刷屏）
-                # if samples_float.min() != 0.0 or samples_float.max() != 0.0:
-                #     print(f"[Audio] Got {len(samples_int16)} samples (int16), "
-                #           f"converted to {len(samples_float)} float32 samples, "
-                #           f"range=[{samples_float.min():.3f}, {samples_float.max():.3f}]")
+                # 调试: 打印音频样本数（每 60 帧打印一次）
+                if not hasattr(self, '_audio_frame_count'):
+                    self._audio_frame_count = 0
+                self._audio_frame_count += 1
+                # if self._audio_frame_count % 60 == 0:
+                #     print(f"[LibRetro Audio] Frame {self._audio_frame_count}: got {len(samples_int16)} samples")
 
                 # 清空缓冲区（避免重复播放）
                 self.audio_driver._buffer = self.audio_driver._buffer.__class__(self.audio_driver._buffer.typecode)
 
-                return samples_float if len(samples_float) > 0 else None
+                return samples_int16 if len(samples_int16) > 0 else None
 
             return None
         except Exception as e:

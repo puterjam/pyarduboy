@@ -223,8 +223,9 @@ class PyArduboy:
                 return False
 
         # 初始化音频驱动
+        # Ardens/Arduous 核心固定使用 50000 Hz 采样率 (16MHz / 320)
         if self.audio_driver:
-            if not self.audio_driver.init():
+            if not self.audio_driver.init(sample_rate=50000):
                 print("Failed to initialize audio driver")
                 return False
 
@@ -277,6 +278,12 @@ class PyArduboy:
 
         try:
             while self._running:
+                # 检查视频驱动是否已关闭（例如用户关闭了窗口）
+                if self.video_driver and hasattr(self.video_driver, 'is_running'):
+                    if not self.video_driver.is_running:
+                        print("\nVideo window closed by user")
+                        break
+
                 frame_start = time.perf_counter()
                 # 基于真实时间累加逻辑时间，避免固定步长误差
                 dt = frame_start - last_time
@@ -320,17 +327,19 @@ class PyArduboy:
                         if frame is not None:
                             self._last_frame = frame
 
+                    # ✅ 关键: 每次 run_frame() 后立即获取并播放音频
+                    # 符合 libretro 规范: audio batch callback 必须与 retro_run() 同步
+                    # 参考: https://docs.libretro.com/development/cores/developing-cores/
+                    if self.audio_driver:
+                        samples = self.bridge.get_audio_samples()
+                        if samples is not None:
+                            self.audio_driver.play_samples(samples)
+
                 self._frame_count += 1
 
                 # 渲染视频 (每次显示帧都渲染,重复显示上一个逻辑帧)
                 if self.video_driver and self._last_frame is not None:
                     self.video_driver.render(self._last_frame)
-
-                # 播放音频 (仅在执行了逻辑帧时)
-                if logic_executed and self.audio_driver:
-                    samples = self.bridge.get_audio_samples()
-                    if samples is not None:
-                        self.audio_driver.play_samples(samples)
 
                 # 检查是否达到最大帧数
                 # if max_frames and self._logic_frame_count >= max_frames:

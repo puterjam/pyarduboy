@@ -37,9 +37,9 @@ class PygameMixerDriver(AudioDriver):
 
     def __init__(
         self,
-        sample_rate: int = 44100,  # 匹配 Ardens: 16MHz / 320
-        channels: int = 2,          # 单声道（Arduboy 硬件特性）
-        buffer_size: int = 4096,    # 降低延迟
+        sample_rate: int = 48000,  # 匹配 Ardens: 16MHz / 320 = 50kHz
+        channels: int = 2,          # 立体声（更好的兼容性）
+        buffer_size: int = 1024,    # 降低延迟 (从 4096 降低到 1024)
         volume: float = 0.3
     ):
         super().__init__()
@@ -55,6 +55,11 @@ class PygameMixerDriver(AudioDriver):
         self._initialized = False
         self._channel = None
         self._resampler_state = 0.0  # 用于重采样的状态
+
+        # 音频统计信息（用于调试）
+        self._frame_count = 0
+        self._total_samples = 0
+        self._underrun_count = 0  # 音频队列空的次数
 
     def init(self, sample_rate: int = 50000) -> bool:
         """
@@ -189,17 +194,29 @@ class PygameMixerDriver(AudioDriver):
             # - 立体声: (n, 2) 2D 数组
             sound = pygame.sndarray.make_sound(audio_data)
 
-            # 6. 智能队列管理（降低延迟策略）
+            # 6. 优化的队列管理（保证连续性和低延迟）
             # - 如果通道空闲，直接播放
-            # - 如果通道正在播放但队列为空，排队
-            # - 如果队列已有数据，跳过（避免累积过多延迟）
+            # - 如果通道正在播放，始终排队 (保证音频连续,避免断音)
+            # - pygame.mixer 会自动管理队列,最多只能排队1个 Sound 对象
             if not self._channel.get_busy():
                 # 通道空闲，直接播放
                 self._channel.play(sound)
-            elif not self._channel.get_queue():
-                # 通道忙但队列为空，排队下一个
+                self._underrun_count += 1  # 记录音频中断次数
+            else:
+                # 通道忙，排队下一个 (pygame 只允许队列1个,会自动替换旧的)
                 self._channel.queue(sound)
-            # else: 队列已有数据，跳过这一帧避免延迟累积
+
+            # 更新统计信息
+            self._frame_count += 1
+            self._total_samples += len(samples)
+
+            # 每 300 帧打印一次统计信息（约 5 秒）
+            # if self._frame_count % 300 == 0:
+            #     avg_samples = self._total_samples / self._frame_count if self._frame_count > 0 else 0
+            #     underrun_rate = self._underrun_count / self._frame_count * 100 if self._frame_count > 0 else 0
+            #     print(f"[Audio Stats] Frames: {self._frame_count}, "
+            #           f"Avg samples/frame: {avg_samples:.1f}, "
+            #           f"Underruns: {self._underrun_count} ({underrun_rate:.1f}%)")
 
         except Exception as e:
             # 只在第一次错误时打印

@@ -252,11 +252,22 @@ class PygameDriver(VideoDriver):
 
     def close(self) -> None:
         """关闭 pygame 窗口"""
+        if not self._running:
+            return  # 已经关闭，避免重复调用
+
         self._running = False
+
         if self.pygame:
             try:
+                # 先关闭显示窗口
+                if self.screen is not None:
+                    self.pygame.display.quit()
+                    self.screen = None
+
+                # 然后退出 pygame
                 self.pygame.quit()
             except Exception:
+                # 静默处理异常，因为在退出时可能会有一些无害的错误
                 pass
 
     @property
