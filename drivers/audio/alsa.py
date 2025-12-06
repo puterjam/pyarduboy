@@ -38,12 +38,12 @@ class AlsaAudioDriver(AudioDriver):
         self._running = False
         self._write_errors = 0
 
-    def init(self, sample_rate: int = 50000) -> bool:
+    def init(self, sample_rate: int = 44100) -> bool:
         """
         初始化 ALSA 音频设备
 
         Args:
-            sample_rate: 采样率，默认 50000 Hz (Ardens 标准)
+            sample_rate: 采样率，默认 44100 Hz (Ardens 标准)
                         libretro 核心会传入实际采样率
 
         Returns:
