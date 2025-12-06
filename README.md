@@ -55,4 +55,4 @@ MIT License
 
 ## Part of
 
-This library is used by [pyarduboy_runner](https://github.com/puterjam/pyarduboy_runner) - a complete Arduboy emulator for Raspberry Pi and other platforms.
+This library is used by [pyarduboy-runner](https://github.com/puterjam/pyarduboy-runner) - a complete Arduboy emulator for Raspberry Pi and other platforms.
