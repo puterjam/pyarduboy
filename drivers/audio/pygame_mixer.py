@@ -120,11 +120,11 @@ class PygameMixerDriver(AudioDriver):
             else:
                 samples_int16 = samples
 
-            # 3. 确保数组是 C-contiguous（pygame.sndarray 要求）
+            # 2. 确保数组是 C-contiguous（pygame.sndarray 要求）
             if not samples_int16.flags['C_CONTIGUOUS']:
                 samples_int16 = np.ascontiguousarray(samples_int16)
 
-            # 4. 处理声道转换
+            # 3. 处理声道转换
             # 注意: pygame.sndarray.make_sound 对单声道的要求:
             # - 单声道 mixer: 需要 1D 数组 (n,)，不能是 (n, 1)
             # - 立体声 mixer: 需要 2D 数组 (n, 2)
@@ -145,7 +145,7 @@ class PygameMixerDriver(AudioDriver):
                         pad = np.repeat(audio_data[:, :1], self.channels - take, axis=1)
                         audio_data = np.concatenate([audio_data, pad], axis=1)
 
-            # 确保是 C-contiguous
+            # 4. 确保是 C-contiguous
             if not audio_data.flags['C_CONTIGUOUS']:
                 audio_data = np.ascontiguousarray(audio_data)
 

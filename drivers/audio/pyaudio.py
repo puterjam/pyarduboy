@@ -204,14 +204,14 @@ class PyAudioDriver(AudioDriver):
             self._total_samples += len(samples)
 
             # 每 300 帧打印一次统计信息（约 5 秒 @ 60 FPS）
-            if self._frame_count % 300 == 0:
-                avg_samples = self._total_samples / self._frame_count if self._frame_count > 0 else 0
-                underrun_rate = self._underrun_count / self._frame_count * 100 if self._frame_count > 0 else 0
-                buffer_len = len(self._audio_buffer)
-                print(f"[PyAudio] Frames: {self._frame_count}, "
-                      f"Avg: {avg_samples:.1f} samples/frame, "
-                      f"Underruns: {self._underrun_count} ({underrun_rate:.1f}%), "
-                      f"Queue: {buffer_len}")
+            # if self._frame_count % 300 == 0:
+            #     avg_samples = self._total_samples / self._frame_count if self._frame_count > 0 else 0
+            #     underrun_rate = self._underrun_count / self._frame_count * 100 if self._frame_count > 0 else 0
+            #     buffer_len = len(self._audio_buffer)
+            #     print(f"[PyAudio] Frames: {self._frame_count}, "
+            #           f"Avg: {avg_samples:.1f} samples/frame, "
+            #           f"Underruns: {self._underrun_count} ({underrun_rate:.1f}%), "
+            #           f"Queue: {buffer_len}")
 
         except Exception as e:
             # 只在第一次错误时打印
