@@ -144,9 +144,14 @@ class LibretroBridge:
             self.video_driver = ArrayVideoDriver()
             self.builder.with_video(self.video_driver)
 
-            # 设置音频驱动
-            self.audio_driver = ArrayAudioDriver()
-            self.builder.with_audio(self.audio_driver)
+            # 设置音频驱动（在 Python 3.11+ 可能会失败）
+            try:
+                self.audio_driver = ArrayAudioDriver()
+                self.builder.with_audio(self.audio_driver)
+            except Exception as e:
+                print(f"Warning: Could not initialize audio driver: {e}")
+                print("Continuing without audio support...")
+                self.audio_driver = None
 
             # 设置输入驱动
             self.input_driver = IterableInputDriver(lambda: self._input_generator())

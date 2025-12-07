@@ -38,6 +38,14 @@ class AlsaAudioDriver(AudioDriver):
         self._running = False
         self._write_errors = 0
 
+        # 音频增益自动校正（解决多线程环境下增益不一致的问题）
+        self._auto_gain = True
+        self._target_peak = 2000  # Ardens 标准音量峰值
+        self._detected_peak = None
+
+        # 调试开关
+        self._debug = False  # 设置为 True 启用详细调试信息
+
     def init(self, sample_rate: int = 44100) -> bool:
         """
         初始化 ALSA 音频设备
@@ -106,8 +114,6 @@ class AlsaAudioDriver(AudioDriver):
 
         Args:
             samples: 音频采样数据，numpy 数组格式
-                    - int16 格式：来自 libretro 核心，范围 [-32768, 32767]
-                    - float32 格式：归一化范围 [-1.0, 1.0]
 
         注意：
             - Ardens 输出 int16 格式，范围 [-SOUND_GAIN, +SOUND_GAIN] (SOUND_GAIN=2000)
@@ -120,10 +126,59 @@ class AlsaAudioDriver(AudioDriver):
             return
 
         try:
+            # 调试信息：监控音频数据
+            if self._debug:
+                if not hasattr(self, '_frame_count'):
+                    self._frame_count = 0
+                    self._non_zero_count = 0
+
+                self._frame_count += 1
+                max_val = abs(samples).max()
+
+                # 检测到非零音频时打印
+                if max_val > 0:
+                    self._non_zero_count += 1
+                    if self._non_zero_count <= 5:  # 只打印前5次非零音频
+                        print(f"[ALSA Debug] Frame {self._frame_count} - Non-zero audio detected!")
+                        print(f"  Shape: {samples.shape}")
+                        print(f"  Dtype: {samples.dtype}")
+                        print(f"  Min/Max: {samples.min()}/{samples.max()}")
+                        print(f"  Mean: {samples.mean():.2f}")
+                        print(f"  First 20 samples: {samples.flatten()[:20]}")
+
+                # 每1000帧统计一次
+                if self._frame_count % 1000 == 0:
+                    print(f"[ALSA Stats] {self._frame_count} frames, {self._non_zero_count} non-zero ({100*self._non_zero_count/self._frame_count:.1f}%)")
+            else:
+                # 即使不调试，也需要计算 max_val 用于增益控制
+                max_val = abs(samples).max()
+
+            # 转换为 int16
             if samples.dtype != np.int16:
                 samples_int16 = np.asarray(samples, dtype=np.int16)
             else:
                 samples_int16 = samples
+
+            # 自动增益校正
+            if self._auto_gain and max_val > 0:
+                # 检测峰值（使用前几帧非零音频的最大值）
+                if self._detected_peak is None:
+                    # 初始化非零计数器（如果未开启调试模式）
+                    if not hasattr(self, '_non_zero_count'):
+                        self._non_zero_count = 0
+                    self._non_zero_count += 1
+
+                    if self._non_zero_count <= 10:
+                        current_peak = abs(samples_int16).max()
+                        if current_peak > self._target_peak * 1.5:  # 峰值明显高于标准值
+                            self._detected_peak = current_peak
+                            print(f"[ALSA] Auto-gain detected peak: {current_peak}, target: {self._target_peak}")
+                            print(f"[ALSA] Gain correction factor: {self._target_peak / current_peak:.3f}")
+
+                # 应用增益校正
+                if self._detected_peak and self._detected_peak > self._target_peak:
+                    gain_factor = self._target_peak / self._detected_peak
+                    samples_int16 = (samples_int16.astype(np.float32) * gain_factor).astype(np.int16)
 
             if not samples_int16.flags['C_CONTIGUOUS']:
                 samples_int16 = np.ascontiguousarray(samples_int16)
@@ -132,10 +187,11 @@ class AlsaAudioDriver(AudioDriver):
 
             try:
                 self.pcm.write(audio_data)
-            except alsaaudio.ALSAAudioError:
+            except alsaaudio.ALSAAudioError as e:
                 # 非阻塞模式下，缓冲区满时会抛出异常，这是正常的
                 self._write_errors += 1
-                pass
+                if self._write_errors % 100 == 1:  # 每100次丢帧警告一次
+                    print(f"[ALSA] Buffer full, dropped {self._write_errors} frames: {e}")
 
             # 更新统计信息
         except Exception as e:

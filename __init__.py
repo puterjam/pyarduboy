@@ -22,7 +22,7 @@ Usage:
 """
 
 __version__ = "0.1.0"
-__author__ = "PyArduboy Team"
+__author__ = "PuterJam@gmail.com"
 
 from .core import PyArduboy
 from .libretro_bridge import LibretroBridge
