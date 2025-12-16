@@ -11,6 +11,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         "numpy",
+        "libretro.py>=0.1.0",  # 添加 libretro.py 作为必需依赖
     ],
     extras_require={
         "pygame": ["pygame"],
